@@ -503,6 +503,8 @@ static void _mouse() {
 	
 static const char asciimouse[] =	
 "\n"
+"\n"
+"\n"
 "	                                                                     \n"
 "           ******                                                       \n"
 "           *    *                                      *********        \n"
@@ -558,11 +560,10 @@ static const char asciimouse[] =
 "                                                                        \n";
 
 	gfx_clear_grey(0x1B);
-	//gfx_con_setpos(0, 0);
-	gfx_con_setpos(0,  1260);
+	gfx_con_setpos(0, 0);
 	gfx_con.fntsz = 10;
 	gfx_printf(asciimouse, TXT_CLR_CYAN_L, TXT_CLR_TURQUOISE, TXT_CLR_CYAN_L, TXT_CLR_DEFAULT);
-
+	usleep(10);
 	//btn_wait();
 																		 	
 }
@@ -685,7 +686,6 @@ skip_lp0_minerva_config:
 
 	while (true) {
 		_mouse();
-		isleep(30000);
 		boot_to_ams();
 		//tui_do_menu(&menu_top);
 	}
