@@ -5,7 +5,7 @@ this payload only link to the reboot_payload in folder atmosphere on your sd car
 
 this payload bin will just boot atmosphere.   
 
-Just drop this bin in /bootloader/payloads or rename it to payload.bin and put it on the root of sd card for mod chip users.  
+Just drop this bin in TegraRcmGui favorites folder, /bootloader/payloads on sd card, or rename it to payload.bin and put it on the root of sd card for mod chip users.  
 
 Thank you very much to CTCaer!
 This software is heavily based on [Hekate](https://github.com/CTCaer/hekate). 
