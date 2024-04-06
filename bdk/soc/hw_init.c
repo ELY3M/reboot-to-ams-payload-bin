@@ -277,12 +277,12 @@ static void _config_regulators(bool tegra_t210)
 	// Disable low battery shutdown monitor.
 	max77620_low_battery_monitor_config(false);
 
-	// Disable SDMMC1 IO power.
-	gpio_write(GPIO_PORT_E, GPIO_PIN_4, GPIO_LOW);
+	// Disable SDMMC1 IO/Core power.
 	max7762x_regulator_enable(REGULATOR_LDO2, false);
+	gpio_write(GPIO_PORT_E, GPIO_PIN_4, GPIO_LOW);
 	sd_power_cycle_time_start = get_tmr_ms();
 
-	// Disable LCD DVDD.
+	// Disable LCD DVDD to make sure it's in a reset state.
 	max7762x_regulator_enable(REGULATOR_LDO0, false);
 
 	i2c_send_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_CNFGBBC, MAX77620_CNFGBBC_RESISTOR_1K);
@@ -367,7 +367,7 @@ void hw_init()
 	uart_invert(DEBUG_UART_PORT, DEBUG_UART_INVERT, UART_INVERT_TXD);
 #endif
 
-	// Enable Dynamic Voltage and Frequency Scaling device clock.
+	// Enable CL-DVFS clock unconditionally to avoid issues with I2C5 sharing.
 	clock_enable_cl_dvfs();
 
 	// Enable clocks to I2C1 and I2CPWR.

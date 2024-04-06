@@ -363,7 +363,7 @@ static void _check_low_battery()
 
 	u8 *battery_icon     = malloc(0x95A); // 21x38x3
 	u8 *charging_icon    = malloc(0x2F4); // 21x12x3
-	u8 *no_charging_icon = calloc(0x2F4, 1);
+	u8 *no_charging_icon = zalloc(0x2F4);
 
 	memcpy(charging_icon, battery_res, 0x2F4);
 	memcpy(battery_icon, battery_res + 0x2F4, 0x95A);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022 CTCaer
+ * Copyright (c) 2019-2024 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -27,10 +27,10 @@
 #include <soc/t210.h>
 #include <utils/util.h>
 
-#define LA_REGS_OFFSET_T210    0x1284
-#define LA_REGS_OFFSET_T210B01 0xFA4
+#define TABLE_FREQ_KHZ_OFFSET        0x40
+#define TABLE_LA_REGS_T210_OFFSET    0x1284
+#define TABLE_LA_REGS_T210B01_OFFSET 0xFA4
 #define LA_SDMMC1_INDEX 6
-#define LA_SDMMC4_INDEX 9
 
 extern volatile nyx_storage_t *nyx_str;
 
@@ -148,10 +148,22 @@ void minerva_change_freq(minerva_freq_t freq)
 void minerva_sdmmc_la_program(void *table, bool t210b01)
 {
 
-	u32 *la_scale_regs = (u32 *)(table + (t210b01 ? LA_REGS_OFFSET_T210B01 : LA_REGS_OFFSET_T210));
+	u32 freq = *(u32 *)(table + TABLE_FREQ_KHZ_OFFSET);
+	u32 *la_scale_regs = (u32 *)(table + (t210b01 ? TABLE_LA_REGS_T210B01_OFFSET : TABLE_LA_REGS_T210_OFFSET));
 
-	// Promote SDMMC1 latency allowance to SDMMC4 (SD to eMMC).
-	la_scale_regs[LA_SDMMC1_INDEX] = la_scale_regs[LA_SDMMC4_INDEX];
+	// Adjust SDMMC1 latency allowance.
+	switch (freq)
+	{
+	case 204000:
+		la_scale_regs[LA_SDMMC1_INDEX] = (la_scale_regs[LA_SDMMC1_INDEX] & 0xFF0000) | 50;
+		break;
+	case 408000:
+		la_scale_regs[LA_SDMMC1_INDEX] = (la_scale_regs[LA_SDMMC1_INDEX] & 0xFF0000) | 25;
+		break;
+	default:
+		la_scale_regs[LA_SDMMC1_INDEX] = (la_scale_regs[LA_SDMMC1_INDEX] & 0xFF0000) | 20;
+		break;
+	}
 }
 
 void minerva_prep_boot_freq()
@@ -171,7 +183,7 @@ void minerva_prep_boot_freq()
 	minerva_change_freq(FREQ_800);
 }
 
-void minerva_prep_boot_l4t(u32 oc_freq)
+void minerva_prep_boot_l4t(u32 oc_freq, u32 opt_custom)
 {
 	if (!minerva_cfg)
 		return;
@@ -188,9 +200,28 @@ void minerva_prep_boot_l4t(u32 oc_freq)
 		memcpy(&mtc_cfg->mtc_table[mtc_cfg->table_entries],
 			   &mtc_cfg->mtc_table[mtc_cfg->table_entries - 1],
 			   sizeof(emc_table_t));
-		mtc_cfg->mtc_table[mtc_cfg->table_entries].rate_khz = oc_freq;
+
+		mtc_cfg->mtc_table[mtc_cfg->table_entries].opt_custom = opt_custom;
+		mtc_cfg->mtc_table[mtc_cfg->table_entries].rate_khz   = oc_freq;
 		mtc_cfg->table_entries++;
 	}
+
+	// Trim table.
+	int entries = 0;
+	for (u32 i = 0; i < mtc_cfg->table_entries; i++)
+	{
+		// Copy frequencies from 204/408/800 MHz and 1333+ MHz.
+		int rate = mtc_cfg->mtc_table[i].rate_khz;
+		if (rate == FREQ_204 ||
+			rate == FREQ_408 ||
+			rate == FREQ_800 ||
+			rate >= FREQ_1333)
+		{
+			memcpy(&mtc_cfg->mtc_table[entries], &mtc_cfg->mtc_table[i], sizeof(emc_table_t));
+			entries++;
+		}
+	}
+	mtc_cfg->table_entries = entries;
 
 	// Set init frequency.
 	minerva_change_freq(FREQ_204);
@@ -199,37 +230,20 @@ void minerva_prep_boot_l4t(u32 oc_freq)
 	mtc_cfg->train_mode = OP_TRAIN;
 	for (u32 i = 0; i < mtc_cfg->table_entries; i++)
 	{
-		mtc_cfg->rate_to = mtc_cfg->mtc_table[i].rate_khz;
-		// Skip already trained frequencies.
-		if (mtc_cfg->rate_to == FREQ_204  ||
-			mtc_cfg->rate_to == FREQ_800  ||
-			mtc_cfg->rate_to == FREQ_1600 ||
-			mtc_cfg->rate_to == oc_freq) // Skip OC freq since Arachne handles it.
+		// Skip already trained frequencies and OC freq (Arachne handles it).
+		if (mtc_cfg->mtc_table[i].trained || mtc_cfg->rate_to == oc_freq)
 			continue;
 
 		// Train frequency.
+		mtc_cfg->rate_to = mtc_cfg->mtc_table[i].rate_khz;
 		minerva_cfg(mtc_cfg, NULL);
 	}
 
 	// Do FSP WAR and scale to 800 MHz as boot freq.
 	bool fsp_opwr_disabled = !(EMC(EMC_MRW3) & 0xC0);
 	if (fsp_opwr_disabled)
-		minerva_change_freq(FREQ_666);
+		minerva_change_freq(FREQ_1333);
 	minerva_change_freq(FREQ_800);
-
-	// Trim table.
-	int entries = 0;
-	for (u32 i = 0; i < mtc_cfg->table_entries; i++)
-	{
-		// Copy freqs from 204 MHz to 800 MHz and 1600 MHz and above.
-		int rate = mtc_cfg->mtc_table[i].rate_khz;
-		if ((rate >= FREQ_204 && rate <= FREQ_800) || rate >= FREQ_1600)
-		{
-			memcpy(&mtc_cfg->mtc_table[entries], &mtc_cfg->mtc_table[i], sizeof(emc_table_t));
-			entries++;
-		}
-	}
-	mtc_cfg->table_entries = entries;
 
 	// Do not let other mtc ops.
 	mtc_cfg->init_done = 0;

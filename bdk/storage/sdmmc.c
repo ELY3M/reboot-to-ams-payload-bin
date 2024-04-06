@@ -184,7 +184,7 @@ int sdmmc_storage_vendor_sandisk_report(sdmmc_storage_t *storage, void *buf)
 
 	reqbuf.buf              = buf;
 	reqbuf.num_sectors      = 1;
-	reqbuf.blksize          = 512;
+	reqbuf.blksize          = SDMMC_DAT_BLOCKSIZE;
 	reqbuf.is_write         = 0;
 	reqbuf.is_multi_block   = 0;
 	reqbuf.is_auto_stop_trn = 0;
@@ -215,7 +215,7 @@ static int _sdmmc_storage_readwrite_ex(sdmmc_storage_t *storage, u32 *blkcnt_out
 
 	reqbuf.buf              = buf;
 	reqbuf.num_sectors      = num_sectors;
-	reqbuf.blksize          = 512;
+	reqbuf.blksize          = SDMMC_DAT_BLOCKSIZE;
 	reqbuf.is_write         = is_write;
 	reqbuf.is_multi_block   = 1;
 	reqbuf.is_auto_stop_trn = 1;
@@ -326,7 +326,7 @@ reinit_try:
 out:
 		sct_off += blkcnt;
 		sct_total -= blkcnt;
-		bbuf += 512 * blkcnt;
+		bbuf += SDMMC_DAT_BLOCKSIZE * blkcnt;
 	}
 
 	return 1;
@@ -338,13 +338,13 @@ int sdmmc_storage_read(sdmmc_storage_t *storage, u32 sector, u32 num_sectors, vo
 	if (mc_client_has_access(buf) && !((u32)buf % 8))
 		return _sdmmc_storage_readwrite(storage, sector, num_sectors, buf, 0);
 
-	if (num_sectors > (SDMMC_UP_BUF_SZ / 512))
+	if (num_sectors > (SDMMC_UP_BUF_SZ / SDMMC_DAT_BLOCKSIZE))
 		return 0;
 
 	u8 *tmp_buf = (u8 *)SDMMC_UPPER_BUFFER;
 	if (_sdmmc_storage_readwrite(storage, sector, num_sectors, tmp_buf, 0))
 	{
-		memcpy(buf, tmp_buf, 512 * num_sectors);
+		memcpy(buf, tmp_buf, SDMMC_DAT_BLOCKSIZE * num_sectors);
 		return 1;
 	}
 	return 0;
@@ -356,11 +356,11 @@ int sdmmc_storage_write(sdmmc_storage_t *storage, u32 sector, u32 num_sectors, v
 	if (mc_client_has_access(buf) && !((u32)buf % 8))
 		return _sdmmc_storage_readwrite(storage, sector, num_sectors, buf, 1);
 
-	if (num_sectors > (SDMMC_UP_BUF_SZ / 512))
+	if (num_sectors > (SDMMC_UP_BUF_SZ / SDMMC_DAT_BLOCKSIZE))
 		return 0;
 
 	u8 *tmp_buf = (u8 *)SDMMC_UPPER_BUFFER;
-	memcpy(tmp_buf, buf, 512 * num_sectors);
+	memcpy(tmp_buf, buf, SDMMC_DAT_BLOCKSIZE * num_sectors);
 	return _sdmmc_storage_readwrite(storage, sector, num_sectors, tmp_buf, 1);
 }
 
@@ -519,7 +519,7 @@ int mmc_storage_get_ext_csd(sdmmc_storage_t *storage, void *buf)
 
 	sdmmc_req_t reqbuf;
 	reqbuf.buf = buf;
-	reqbuf.blksize = 512;
+	reqbuf.blksize = SDMMC_DAT_BLOCKSIZE;
 	reqbuf.num_sectors = 1;
 	reqbuf.is_write = 0;
 	reqbuf.is_multi_block = 0;
@@ -708,9 +708,9 @@ int sdmmc_storage_init_mmc(sdmmc_storage_t *storage, sdmmc_t *sdmmc, u32 bus_wid
 		return 0;
 	DPRINTF("[MMC] card selected\n");
 
-	if (!_sdmmc_storage_set_blocklen(storage, 512))
+	if (!_sdmmc_storage_set_blocklen(storage, EMMC_BLOCKSIZE))
 		return 0;
-	DPRINTF("[MMC] set blocklen to 512\n");
+	DPRINTF("[MMC] set blocklen to EMMC_BLOCKSIZE\n");
 
 	// Check system specification version, only version 4.0 and later support below features.
 	if (storage->csd.mmca_vsn < CSD_SPEC_VER_4)
@@ -1089,7 +1089,7 @@ static int _sd_storage_switch_get(sdmmc_storage_t *storage, void *buf)
 
 	sdmmc_req_t reqbuf;
 	reqbuf.buf              = buf;
-	reqbuf.blksize          = 64;
+	reqbuf.blksize          = SDMMC_CMD_BLOCKSIZE;
 	reqbuf.num_sectors      = 1;
 	reqbuf.is_write         = 0;
 	reqbuf.is_multi_block   = 0;
@@ -1113,7 +1113,7 @@ static int _sd_storage_switch(sdmmc_storage_t *storage, void *buf, int mode, int
 
 	sdmmc_req_t reqbuf;
 	reqbuf.buf              = buf;
-	reqbuf.blksize          = 64;
+	reqbuf.blksize          = SDMMC_CMD_BLOCKSIZE;
 	reqbuf.num_sectors      = 1;
 	reqbuf.is_write         = 0;
 	reqbuf.is_multi_block   = 0;
@@ -1292,21 +1292,36 @@ static int _sd_storage_set_card_bus_speed(sdmmc_storage_t *storage, u32 hs_type,
 	return 0;
 }
 
-static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u8 *buf)
+int sd_storage_get_fmodes(sdmmc_storage_t *storage, u8 *buf, sd_func_modes_t *fmodes)
 {
-	if (sdmmc_get_bus_width(storage->sdmmc) != SDMMC_BUS_WIDTH_4)
-		return 0;
+	if (!buf)
+		buf = (u8 *)SDMMC_UPPER_BUFFER;
 
 	if (!_sd_storage_switch_get(storage, buf))
 		return 0;
 
-	u8  access_mode = buf[13];
-	u16 power_limit = buf[7]  | (buf[6]  << 8);
+	fmodes->access_mode     = buf[13] | (buf[12] << 8);
+	fmodes->cmd_system      = buf[11] | (buf[10] << 8);
+	fmodes->driver_strength = buf[9]  | (buf[8]  << 8);
+	fmodes->power_limit     = buf[7]  | (buf[6]  << 8);
+
+	return 1;
+}
+
+static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u8 *buf)
+{
+	sd_func_modes_t fmodes;
+
+	if (sdmmc_get_bus_width(storage->sdmmc) != SDMMC_BUS_WIDTH_4)
+		return 0;
+
+	if (!sd_storage_get_fmodes(storage, buf, &fmodes))
+		return 0;
+
 #ifdef BDK_SDMMC_UHS_DDR200_SUPPORT
-	u16 cmd_system  = buf[11] | (buf[10] << 8);
-	DPRINTF("[SD] access: %02X, power: %02X, cmd: %02X\n", access_mode, power_limit, cmd_system);
+	DPRINTF("[SD] access: %02X, power: %02X, cmd: %02X\n", fmodes.access_mode, fmodes.power_limit, fmodes.cmd_system);
 #else
-	DPRINTF("[SD] access: %02X, power: %02X\n", access_mode, power_limit);
+	DPRINTF("[SD] access: %02X, power: %02X\n", fmodes.access_mode, fmodes.power_limit);
 #endif
 
 	u32 hs_type = 0;
@@ -1315,11 +1330,11 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 #ifdef BDK_SDMMC_UHS_DDR200_SUPPORT
 	case SDHCI_TIMING_UHS_DDR200:
 		// Fall through if DDR200 is not supported.
-		if (cmd_system & SD_MODE_UHS_DDR200)
+		if (fmodes.cmd_system & SD_MODE_UHS_DDR200)
 		{
 			DPRINTF("[SD] setting bus speed to DDR200\n");
 			storage->csd.busspeed = 200;
-			_sd_storage_set_power_limit(storage, power_limit, buf);
+			_sd_storage_set_power_limit(storage, fmodes.power_limit, buf);
 			return _sd_storage_enable_DDR200(storage, buf);
 		}
 #endif
@@ -1327,7 +1342,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 	case SDHCI_TIMING_UHS_SDR104:
 	case SDHCI_TIMING_UHS_SDR82:
 		// Fall through if not supported.
-		if (access_mode & SD_MODE_UHS_SDR104)
+		if (fmodes.access_mode & SD_MODE_UHS_SDR104)
 		{
 			type    = SDHCI_TIMING_UHS_SDR104;
 			hs_type = UHS_SDR104_BUS_SPEED;
@@ -1345,7 +1360,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 		}
 
 	case SDHCI_TIMING_UHS_SDR50:
-		if (access_mode & SD_MODE_UHS_SDR50)
+		if (fmodes.access_mode & SD_MODE_UHS_SDR50)
 		{
 			type    = SDHCI_TIMING_UHS_SDR50;
 			hs_type = UHS_SDR50_BUS_SPEED;
@@ -1355,7 +1370,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 		}
 /*
 	case SDHCI_TIMING_UHS_DDR50:
-		if (access_mode & SD_MODE_UHS_DDR50)
+		if (fmodes.access_mode & SD_MODE_UHS_DDR50)
 		{
 			type    = SDHCI_TIMING_UHS_DDR50;
 			hs_type = UHS_DDR50_BUS_SPEED;
@@ -1365,7 +1380,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 		}
 */
 	case SDHCI_TIMING_UHS_SDR25:
-		if (access_mode & SD_MODE_UHS_SDR25)
+		if (fmodes.access_mode & SD_MODE_UHS_SDR25)
 		{
 			type = SDHCI_TIMING_UHS_SDR25;
 			hs_type = UHS_SDR25_BUS_SPEED;
@@ -1382,7 +1397,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 
 	// Try to raise the power limit to let the card perform better.
 	if (hs_type != UHS_SDR25_BUS_SPEED)
-		_sd_storage_set_power_limit(storage, power_limit, buf);
+		_sd_storage_set_power_limit(storage, fmodes.power_limit, buf);
 
 	// Setup and set selected card and bus speed.
 	if (!_sd_storage_set_card_bus_speed(storage, hs_type, buf))
@@ -1402,17 +1417,17 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 
 static int _sd_storage_enable_hs_high_volt(sdmmc_storage_t *storage, u8 *buf)
 {
-	if (!_sd_storage_switch_get(storage, buf))
+	sd_func_modes_t fmodes;
+
+	if (!sd_storage_get_fmodes(storage, buf, &fmodes))
 		return 0;
 
-	u8  access_mode = buf[13];
-	u16 power_limit = buf[7] | buf[6] << 8;
-	DPRINTF("[SD] access: %02X, power: %02X\n", access_mode, power_limit);
+	DPRINTF("[SD] access: %02X, power: %02X\n", fmodes.access_mode, fmodes.power_limit);
 
 	// Try to raise the power limit to let the card perform better.
-	_sd_storage_set_power_limit(storage, power_limit, buf);
+	_sd_storage_set_power_limit(storage, fmodes.power_limit, buf);
 
-	if (!(access_mode & SD_MODE_HIGH_SPEED))
+	if (!(fmodes.access_mode & SD_MODE_HIGH_SPEED))
 		return 1;
 
 	if (!_sd_storage_set_card_bus_speed(storage, HIGH_SPEED_BUS_SPEED, buf))
@@ -1511,7 +1526,7 @@ int sd_storage_get_ssr(sdmmc_storage_t *storage, u8 *buf)
 
 	sdmmc_req_t reqbuf;
 	reqbuf.buf              = buf;
-	reqbuf.blksize          = 64;
+	reqbuf.blksize          = SDMMC_CMD_BLOCKSIZE;
 	reqbuf.num_sectors      = 1;
 	reqbuf.is_write         = 0;
 	reqbuf.is_multi_block   = 0;
@@ -1530,7 +1545,7 @@ int sd_storage_get_ssr(sdmmc_storage_t *storage, u8 *buf)
 	sdmmc_get_rsp(storage->sdmmc, &tmp, 4, SDMMC_RSP_TYPE_1);
 
 	// Convert buffer to LE.
-	for (int i = 0; i < 64; i += 4)
+	for (int i = 0; i < SDMMC_CMD_BLOCKSIZE; i += 4)
 	{
 		storage->raw_ssr[i + 3] = buf[i];
 		storage->raw_ssr[i + 2] = buf[i + 1];
@@ -1581,7 +1596,7 @@ static void _sd_storage_parse_csd(sdmmc_storage_t *storage)
 	{
 	case 0:
 		storage->csd.capacity = (1 + unstuff_bits(raw_csd, 62, 12)) << (unstuff_bits(raw_csd, 47, 3) + 2);
-		storage->csd.capacity <<= unstuff_bits(raw_csd, 80, 4) - 9; // Convert native block size to LBA 512B.
+		storage->csd.capacity <<= unstuff_bits(raw_csd, 80, 4) - 9; // Convert native block size to LBA SDMMC_DAT_BLOCKSIZE.
 		break;
 
 	case 1:
@@ -1683,9 +1698,9 @@ int sdmmc_storage_init_sd(sdmmc_storage_t *storage, sdmmc_t *sdmmc, u32 bus_widt
 		return 0;
 	DPRINTF("[SD] card selected\n");
 
-	if (!_sdmmc_storage_set_blocklen(storage, 512))
+	if (!_sdmmc_storage_set_blocklen(storage, SD_BLOCKSIZE))
 		return 0;
-	DPRINTF("[SD] set blocklen to 512\n");
+	DPRINTF("[SD] set blocklen to SD_BLOCKSIZE\n");
 
 	// Disconnect Card Detect resistor from DAT3.
 	if (!_sd_storage_execute_app_cmd_type1(storage, &tmp, SD_APP_SET_CLR_CARD_DETECT, 0, 0, R1_STATE_TRAN))
@@ -1760,7 +1775,7 @@ int _gc_storage_custom_cmd(sdmmc_storage_t *storage, void *buf)
 
 	sdmmc_req_t reqbuf;
 	reqbuf.buf              = buf;
-	reqbuf.blksize          = 64;
+	reqbuf.blksize          = SDMMC_CMD_BLOCKSIZE;
 	reqbuf.num_sectors      = 1;
 	reqbuf.is_write         = 1;
 	reqbuf.is_multi_block   = 0;

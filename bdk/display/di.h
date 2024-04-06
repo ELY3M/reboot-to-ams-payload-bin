@@ -732,9 +732,10 @@
  * [10] 96 [09]: JDI LAM062M109A
  * [20] 93 [0F]: InnoLux P062CCA-AZ1 (Rev A1)
  * [20] 95 [0F]: InnoLux P062CCA-AZ2 (Rev B1)
- * [20] 96 [0F]: InnoLux P062CCA-AZ3 (Rev XX) [UNCONFIRMED MODEL+REV]
+ * [20] 96 [0F]: InnoLux P062CCA-??? (Rev XX) [UNCONFIRMED MODEL+REV]
  * [20] 97 [0F]: InnoLux P062CCA-??? (Rev XX) [UNCONFIRMED MODEL+REV]
  * [20] 98 [0F]: InnoLux P062CCA-??? (Rev XX) [UNCONFIRMED MODEL+REV]
+ * [20] 99 [0F]: InnoLux P062CCA-??? (Rev XX) [UNCONFIRMED MODEL+REV]
  * [30] 93 [0F]: AUO A062TAN00 (59.06A33.000)
  * [30] 94 [0F]: AUO A062TAN01 (59.06A33.001)
  * [30] 95 [0F]: AUO A062TAN02 (59.06A33.002)
@@ -786,12 +787,24 @@ enum
 	PANEL_INL_2J055IA_27A = 0x1020,
 	PANEL_AUO_A055TAN01   = 0x1030,
 	PANEL_SHP_LQ055T1SW10 = 0x1040,
-	PANEL_SAM_AMS699VC01  = 0x2050
+	PANEL_SAM_AMS699VC01  = 0x2050,
+
+	// Found on 6/2" clones. Unknown markings. Quality seems JDI like. Has bad low backlight scaling. ID: [83] 94 [0F].
+	PANEL_OEM_CLONE_6_2   = 0x0F83,
+	// Found on 5.5" clones with AUO A055TAN02 (59.05A30.001) fake markings.
+	PANEL_OEM_CLONE_5_5   = 0x00B3,
+	// Found on 5.5" clones with AUO A055TAN02 (59.05A30.001) fake markings.
+	PANEL_OEM_CLONE       = 0x0000
 };
 
 void display_init();
 void display_backlight_pwm_init();
 void display_end();
+
+/*! Interrupt management. */
+void display_enable_interrupt(u32 intr);
+void display_disable_interrupt(u32 intr);
+void display_wait_interrupt(u32 intr);
 
 /*! Get/Set Display panel ID. */
 u16  display_get_decoded_panel_id();
