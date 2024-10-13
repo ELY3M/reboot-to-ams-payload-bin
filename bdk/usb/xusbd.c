@@ -1,7 +1,7 @@
 /*
  * eXtensible USB Device driver (XDCI) for Tegra X1
  *
- * Copyright (c) 2020-2022 CTCaer
+ * Copyright (c) 2020-2024 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -883,6 +883,9 @@ static void _xusbd_init_device_clocks()
 
 int xusb_device_init()
 {
+	// Ease the stress to APB.
+	bpmp_clk_rate_relaxed(true);
+
 	// Disable USB2 device controller clocks.
 	CLOCK(CLK_RST_CONTROLLER_RST_DEV_L_SET) = BIT(CLK_L_USBD);
 	CLOCK(CLK_RST_CONTROLLER_CLK_ENB_L_CLR) = BIT(CLK_L_USBD);
@@ -919,6 +922,9 @@ int xusb_device_init()
 
 	// Initialize device clocks.
 	_xusbd_init_device_clocks();
+
+	// Restore OC.
+	bpmp_clk_rate_relaxed(false);
 
 	// Enable AHB redirect for access to IRAM for Event/EP ring buffers.
 	mc_enable_ahb_redirect();
@@ -1005,7 +1011,7 @@ static void _xusb_device_power_down()
 	CLOCK(CLK_RST_CONTROLLER_CLK_ENB_W_CLR) = BIT(CLK_W_XUSB);
 }
 
-static int _xusb_queue_trb(u32 ep_idx, void *trb, bool ring_doorbell)
+static int _xusb_queue_trb(u32 ep_idx, const void *trb, bool ring_doorbell)
 {
 	int res = USB_RES_OK;
 	data_trb_t *next_trb;
@@ -1220,7 +1226,7 @@ static int _xusb_wait_ep_stopped(u32 endpoint)
 	return USB_RES_OK;
 }
 
-static int _xusb_handle_transfer_event(transfer_event_trb_t *trb)
+static int _xusb_handle_transfer_event(const transfer_event_trb_t *trb)
 {
 	// Advance dequeue list.
 	data_trb_t *next_trb;
@@ -1455,7 +1461,7 @@ static int _xusb_handle_get_ep_status(u32 ep_idx)
 	return _xusb_issue_data_trb(xusb_ep_status_descriptor, 2, USB_DIR_IN);
 }
 
-static int _xusb_handle_get_class_request(usb_ctrl_setup_t *ctrl_setup)
+static int _xusb_handle_get_class_request(const usb_ctrl_setup_t *ctrl_setup)
 {
 	u8 _bRequest = ctrl_setup->bRequest;
 	u16 _wIndex  = ctrl_setup->wIndex;
@@ -1486,7 +1492,7 @@ stall:
 	return USB_RES_OK;
 }
 
-static int _xusb_handle_get_descriptor(usb_ctrl_setup_t *ctrl_setup)
+static int _xusb_handle_get_descriptor(const usb_ctrl_setup_t *ctrl_setup)
 {
 	u32 size;
 	void *descriptor;
@@ -1615,7 +1621,7 @@ static int _xusb_handle_get_descriptor(usb_ctrl_setup_t *ctrl_setup)
 	return _xusb_issue_data_trb(descriptor, size, USB_DIR_IN);
 }
 
-static void _xusb_handle_set_request_dev_address(usb_ctrl_setup_t *ctrl_setup)
+static void _xusb_handle_set_request_dev_address(const usb_ctrl_setup_t *ctrl_setup)
 {
 	u32 addr = ctrl_setup->wValue & 0xFF;
 
@@ -1627,7 +1633,7 @@ static void _xusb_handle_set_request_dev_address(usb_ctrl_setup_t *ctrl_setup)
 	usbd_xotg->device_state = XUSB_ADDRESSED_STS_WAIT;
 }
 
-static void _xusb_handle_set_request_configuration(usb_ctrl_setup_t *ctrl_setup)
+static void _xusb_handle_set_request_configuration(const usb_ctrl_setup_t *ctrl_setup)
 {
 	usbd_xotg->config_num = ctrl_setup->wValue;
 

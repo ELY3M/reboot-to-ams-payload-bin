@@ -57,7 +57,7 @@ enum kip_offset_section
 
 #include "pkg2_patches.inl"
 
-static kip1_id_t *_kip_id_sets = _kip_ids;
+static kip1_id_t *_kip_id_sets = (kip1_id_t *)_kip_ids;
 static u32 _kip_id_sets_cnt = ARRAY_SIZE(_kip_ids);
 
 void pkg2_get_ids(kip1_id_t **ids, u32 *entries)
@@ -170,7 +170,7 @@ static void parse_external_kip_patches()
 	ext_patches_parsed = true;
 }
 
-const pkg2_kernel_id_t *pkg2_identify(u8 *hash)
+const pkg2_kernel_id_t *pkg2_identify(const u8 *hash)
 {
 	for (u32 i = 0; i < ARRAY_SIZE(_pkg2_kernel_ids); i++)
 	{
@@ -511,10 +511,7 @@ const char *pkg2_patch_kips(link_t *info, char *patch_names)
 		}
 
 		if (strcmp(patches[i], "nogc"))
-		{
 			parse_external_kip_patches();
-			break;
-		}
 	}
 
 	u32 kip_hash[SE_SHA_256_SIZE / sizeof(u32)];
@@ -534,7 +531,7 @@ const char *pkg2_patch_kips(link_t *info, char *patch_names)
 
 			// Check if there are patches to apply.
 			bool patches_found = false;
-			kip1_patchset_t *patchset = _kip_id_sets[kip_id_idx].patchset;
+			const kip1_patchset_t *patchset = _kip_id_sets[kip_id_idx].patchset;
 			while (patchset != NULL && patchset->name != NULL && !patches_found)
 			{
 				for (u32 i = 0; i < patches_num; i++)

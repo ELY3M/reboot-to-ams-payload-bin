@@ -33,7 +33,7 @@
 
 u32 sd_power_cycle_time_start;
 
-static inline u32 unstuff_bits(u32 *resp, u32 start, u32 size)
+static inline u32 unstuff_bits(const u32 *resp, u32 start, u32 size)
 {
 	const u32 mask = (size < 32 ? 1 << size : 0) - 1;
 	const u32 off  = 3 - ((start) / 32);
@@ -233,6 +233,8 @@ static int _sdmmc_storage_readwrite_ex(sdmmc_storage_t *storage, u32 *blkcnt_out
 
 int sdmmc_storage_end(sdmmc_storage_t *storage)
 {
+	DPRINTF("[SDMMC%d] end\n", storage->sdmmc->id);
+
 	if (!_sdmmc_storage_go_idle_state(storage))
 		return 0;
 
@@ -275,7 +277,7 @@ reinit_try:
 		// Disk IO failure! Reinit SD/EMMC to a lower speed.
 		if (storage->sdmmc->id == SDMMC_1 || storage->sdmmc->id == SDMMC_4)
 		{
-			int res;
+			int res = 0;
 
 			if (storage->sdmmc->id == SDMMC_1)
 			{
@@ -781,7 +783,7 @@ static int _sd_storage_execute_app_cmd_type1(sdmmc_storage_t *storage, u32 *resp
 }
 
 #ifdef SDMMC_DEBUG_PRINT_SD_REGS
-void _sd_storage_debug_print_cid(u32 *raw_cid)
+void _sd_storage_debug_print_cid(const u32 *raw_cid)
 {
 	gfx_printf("Card Identification\n");
 
@@ -797,7 +799,7 @@ void _sd_storage_debug_print_cid(u32 *raw_cid)
 	gfx_printf("--RSVD--               %X\n",   unstuff_bits(raw_cid, 20, 4));
 }
 
-void _sd_storage_debug_print_csd(u32 *raw_csd)
+void _sd_storage_debug_print_csd(const u32 *raw_csd)
 {
 	gfx_printf("\n");
 
@@ -834,7 +836,7 @@ void _sd_storage_debug_print_csd(u32 *raw_csd)
 		unstuff_bits(raw_csd, 16, 5),  unstuff_bits(raw_csd, 8, 2));
 }
 
-void _sd_storage_debug_print_scr(u32 *raw_scr)
+void _sd_storage_debug_print_scr(const u32 *raw_scr)
 {
 	u32 resp[4];
 	memcpy(&resp[2], raw_scr, 8);
@@ -855,7 +857,7 @@ void _sd_storage_debug_print_scr(u32 *raw_scr)
 	gfx_printf("--RSVD--               %X\n",   unstuff_bits(resp, 36, 2));
 }
 
-void _sd_storage_debug_print_ssr(u8 *raw_ssr)
+void _sd_storage_debug_print_ssr(const u8 *raw_ssr)
 {
 	u32 raw_ssr0[4]; // 511:384.
 	u32 raw_ssr1[4]; // 383:256.
@@ -910,7 +912,7 @@ void _sd_storage_debug_print_ssr(u8 *raw_ssr)
 static int _sd_storage_send_if_cond(sdmmc_storage_t *storage, bool *is_sdsc)
 {
 	sdmmc_cmd_t cmdbuf;
-	u16 vhd_pattern = SD_VHD_27_36 | 0xAA;
+	u16 vhd_pattern = SD_VHS_27_36 | 0xAA;
 	sdmmc_init_cmd(&cmdbuf, SD_SEND_IF_COND, vhd_pattern, SDMMC_RSP_TYPE_5, 0);
 	if (!sdmmc_execute_cmd(storage->sdmmc, &cmdbuf, NULL, NULL))
 	{
@@ -1132,17 +1134,20 @@ static void _sd_storage_set_power_limit(sdmmc_storage_t *storage, u16 power_limi
 	u32 pwr = SD_SET_POWER_LIMIT_0_72;
 
 	// If UHS-I only, anything above 1.44W defaults to 1.44W.
+	/*
 	if (power_limit & SD_MAX_POWER_2_88)
 		pwr = SD_SET_POWER_LIMIT_2_88;
 	else if (power_limit & SD_MAX_POWER_2_16)
 		pwr = SD_SET_POWER_LIMIT_2_16;
-	else if (power_limit & SD_MAX_POWER_1_44)
+	*/
+	if (power_limit & SD_MAX_POWER_1_44)
 		pwr = SD_SET_POWER_LIMIT_1_44;
 
 	_sd_storage_switch(storage, buf, SD_SWITCH_SET, SD_SWITCH_GRP_PWRLIM, pwr);
 
 	switch ((buf[15] >> 4) & 0x0F)
 	{
+	/*
 	case SD_SET_POWER_LIMIT_2_88:
 		DPRINTF("[SD] power limit raised to 2880 mW\n");
 		break;
@@ -1150,7 +1155,7 @@ static void _sd_storage_set_power_limit(sdmmc_storage_t *storage, u16 power_limi
 	case SD_SET_POWER_LIMIT_2_16:
 		DPRINTF("[SD] power limit raised to 2160 mW\n");
 		break;
-
+	*/
 	case SD_SET_POWER_LIMIT_1_44:
 		DPRINTF("[SD] power limit raised to 1440 mW\n");
 		break;
@@ -1396,7 +1401,7 @@ static int _sd_storage_enable_uhs_low_volt(sdmmc_storage_t *storage, u32 type, u
 	}
 
 	// Try to raise the power limit to let the card perform better.
-	if (hs_type != UHS_SDR25_BUS_SPEED)
+	if (hs_type != UHS_SDR25_BUS_SPEED) // Not applicable for SDR12/SDR25.
 		_sd_storage_set_power_limit(storage, fmodes.power_limit, buf);
 
 	// Setup and set selected card and bus speed.
@@ -1423,9 +1428,6 @@ static int _sd_storage_enable_hs_high_volt(sdmmc_storage_t *storage, u8 *buf)
 		return 0;
 
 	DPRINTF("[SD] access: %02X, power: %02X\n", fmodes.access_mode, fmodes.power_limit);
-
-	// Try to raise the power limit to let the card perform better.
-	_sd_storage_set_power_limit(storage, fmodes.power_limit, buf);
 
 	if (!(fmodes.access_mode & SD_MODE_HIGH_SPEED))
 		return 1;

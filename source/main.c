@@ -36,7 +36,8 @@ hekate_config h_cfg;
 boot_cfg_t __attribute__((section ("._boot_cfg"))) b_cfg;
 const volatile ipl_ver_meta_t __attribute__((section ("._ipl_version"))) ipl_ver = {
 	.magic = BL_MAGIC,
-	.version = (BL_VER_MJ + '0') | ((BL_VER_MN + '0') << 8) | ((BL_VER_HF + '0') << 16),
+	//.version = (BL_VER_MJ + '0') | ((BL_VER_MN + '0') << 8) | ((BL_VER_HF + '0') << 16) | ((BL_VER_RL) << 24),
+	.version = 0,
 	.rsvd0 = 0,
 	.rsvd1 = 0
 };
@@ -46,7 +47,7 @@ volatile nyx_storage_t *nyx_str = (nyx_storage_t *)NYX_STORAGE_ADDR;
 
 
 
-void check_power_off_from_hos()
+static void _check_power_off_from_hos()
 {
 	// Power off on alarm wakeup from HOS shutdown. For modchips/dongles.
 	u8 hos_wakeup = i2c_recv_byte(I2C_5, MAX77620_I2C_ADDR, MAX77620_REG_IRQTOP);
@@ -177,7 +178,7 @@ int launch_payload(char *path, bool clear_screen)
 		{
 			_reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
 
-			hw_reinit_workaround(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
+		hw_deinit(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
 		}
 		else
 		{
@@ -187,7 +188,7 @@ int launch_payload(char *path, bool clear_screen)
 			u32 magic = 0;
 			char *magic_ptr = buf + COREBOOT_VER_OFF;
 			memcpy(&magic, magic_ptr + strlen(magic_ptr) - 4, 4);
-			hw_reinit_workaround(true, magic);
+			hw_deinit(true, magic);
 		}
 
 		// Some cards (Sandisk U1), do not like a fast power cycle. Wait min 100ms.
@@ -301,7 +302,7 @@ static void _show_errors()
 
 		if (h_cfg.errors & ERR_L4T_KERNEL)
 		{
-			WPRINTF("Kernel panic occurred!\n");
+			WPRINTF("L4T Kernel panic occurred!\n");
 			if (!(h_cfg.errors & ERR_SD_BOOT_EN))
 			{
 				if (!sd_save_to_file((void *)PSTORE_ADDR, PSTORE_SZ, "L4T_panic.bin"))
@@ -347,6 +348,9 @@ static void _check_low_battery()
 	int enough_battery;
 	int batt_volt = 0;
 	int charge_status = 0;
+
+	// Enable charger in case it's disabled.
+	bq24193_enable_charger();
 
 	bq24193_get_property(BQ24193_ChargeStatus, &charge_status);
 	max17050_get_property(MAX17050_AvgVCELL,   &batt_volt);
@@ -422,7 +426,7 @@ static void _check_low_battery()
 			if (!screen_on)
 			{
 				display_init();
-				u32 *fb = display_init_framebuffer_pitch();
+				u32 *fb = display_init_window_a_pitch();
 				gfx_init_ctxt(fb, 720, 1280, 720);
 
 				gfx_set_rect_rgb(battery_icon,         BATTERY_EMPTY_WIDTH, BATTERY_EMPTY_BATT_HEIGHT, 16, battery_icon_y_pos);
@@ -459,7 +463,7 @@ out:
 	max77620_low_battery_monitor_config(true);
 }
 
-static void _r2p_get_config_t210b01()
+static void _r2c_get_config_t210b01()
 {
 	rtc_reboot_reason_t rr;
 	if (!max77620_rtc_get_reboot_reason(&rr))
@@ -561,9 +565,9 @@ static const char asciimouse[] =
 
 	gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
-	gfx_con.fntsz = 10;
+	gfx_con.fntsz = 14;
 	gfx_printf(asciimouse, TXT_CLR_CYAN_L, TXT_CLR_TURQUOISE, TXT_CLR_CYAN_L, TXT_CLR_DEFAULT);
-	usleep(10);
+	usleep(3000); //3 secs?  
 	//btn_wait();
 																		 	
 }
@@ -613,10 +617,10 @@ void ipl_main()
 	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
 	hw_init();
 
-	// Pivot the stack so we have enough space.
-	pivot_stack(IPL_STACK_TOP);
+	// Pivot the stack under IPL. (Only max 4KB is needed).
+	pivot_stack(IPL_LOAD_ADDR);
 
-	// Tegra/Horizon configuration goes to 0x80000000+, package2 goes to 0xA9800000, we place our heap in between.
+	// Place heap at a place outside of L4T/HOS configuration and binaries.
 	heap_init((void *)IPL_HEAP_START);
 
 #ifdef DEBUG_UART_PORT
@@ -635,6 +639,9 @@ void ipl_main()
 
 	// Initialize display.
 	display_init();
+
+	// Overclock BPMP.
+	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
 
 	// Mount SD Card.
 	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
@@ -660,19 +667,16 @@ void ipl_main()
 
 skip_lp0_minerva_config:
 	// Initialize display window, backlight and gfx console.
-	u32 *fb = display_init_framebuffer_pitch();
+	u32 *fb = display_init_window_a_pitch();
 	gfx_init_ctxt(fb, 720, 1280, 720);
 	gfx_con_init();
 
 	display_backlight_pwm_init();
-	display_backlight_brightness(150, 1000);
+	display_backlight_brightness(230, 1000);
 
-	// Overclock BPMP.
-	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
-
-	// Get R2P config from RTC.
+	// Get R2C config from RTC.
 	if (h_cfg.t210b01)
-		_r2p_get_config_t210b01();
+		_r2c_get_config_t210b01();
 
 	// Show exceptions, HOS errors, library errors and L4T kernel panics.
 	_show_errors();

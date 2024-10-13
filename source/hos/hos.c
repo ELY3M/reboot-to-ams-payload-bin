@@ -25,7 +25,7 @@
 #include "hos.h"
 #include "hos_config.h"
 #include "secmon_exo.h"
-///#include "../frontend/fe_tools.h"
+#include "../frontend/fe_tools.h"
 #include "../config.h"
 #include "../storage/emummc.h"
 
@@ -123,6 +123,7 @@ static const u8 master_kekseed_t210_tsec_v4[HOS_KB_VERSION_MAX - HOS_KB_VERSION_
 	{ 0x99, 0x22, 0x09, 0x57, 0xA7, 0xF9, 0x5E, 0x94, 0xFE, 0x78, 0x7F, 0x41, 0xD6, 0xE7, 0x56, 0xE6 }, // 16.0.0.
 	{ 0x71, 0xB9, 0xA6, 0xC0, 0xFF, 0x97, 0x6B, 0x0C, 0xB4, 0x40, 0xB9, 0xD5, 0x81, 0x5D, 0x81, 0x90 }, // 17.0.0.
 	{ 0x00, 0x04, 0x5D, 0xF0, 0x4D, 0xCD, 0x14, 0xA3, 0x1C, 0xBF, 0xDE, 0x48, 0x55, 0xBA, 0x35, 0xC1 }, // 18.0.0.
+	{ 0xD7, 0x63, 0x74, 0x46, 0x4E, 0xBA, 0x78, 0x0A, 0x7C, 0x9D, 0xB3, 0xE8, 0x7A, 0x3D, 0x71, 0xE3 }, // 19.0.0.
 };
 
 //!TODO: Update on mkey changes.
@@ -140,6 +141,7 @@ static const u8 master_kekseed_t210b01[HOS_KB_VERSION_MAX - HOS_KB_VERSION_600 +
 	{ 0xA5, 0xEC, 0x16, 0x39, 0x1A, 0x30, 0x16, 0x08, 0x2E, 0xCF, 0x09, 0x6F, 0x5E, 0x7C, 0xEE, 0xA9 }, // 16.0.0.
 	{ 0x8D, 0xEE, 0x9E, 0x11, 0x36, 0x3A, 0x9B, 0x0A, 0x6A, 0xC7, 0xBB, 0xE9, 0xD1, 0x03, 0xF7, 0x80 }, // 17.0.0.
 	{ 0x4F, 0x41, 0x3C, 0x3B, 0xFB, 0x6A, 0x01, 0x2A, 0x68, 0x9F, 0x83, 0xE9, 0x53, 0xBD, 0x16, 0xD2 }, // 18.0.0.
+	{ 0x31, 0xBE, 0x25, 0xFB, 0xDB, 0xB4, 0xEE, 0x49, 0x5C, 0x77, 0x05, 0xC2, 0x36, 0x9F, 0x34, 0x80 }, // 19.0.0.
 };
 
 static const u8 console_keyseed[SE_KEY_128_SIZE] =
@@ -381,7 +383,7 @@ int hos_keygen(void *keyblob, u32 kb, tsec_ctxt_t *tsec_ctxt, bool stock, bool i
 	_hos_eks_get();
 
 	// Use tsec keygen for old firmware or if EKS keys does not exist for newer.
-	if (kb <= HOS_KB_VERSION_620 || !h_cfg.eks || (h_cfg.eks && h_cfg.eks->enabled != HOS_EKS_TSEC_VER))
+	if (kb <= HOS_KB_VERSION_620 || !h_cfg.eks || (h_cfg.eks->enabled != HOS_EKS_TSEC_VER))
 		use_tsec = true;
 
 	if (kb <= HOS_KB_VERSION_600)
@@ -672,7 +674,7 @@ DPRINTF("Parsed GPT\n");
 		goto out;
 
 	// Read in package2 header and get package2 real size.
-	const u32 BCT_SIZE = SZ_16K;
+	static const u32 BCT_SIZE = SZ_16K;
 	bctBuf = (u8 *)malloc(BCT_SIZE);
 	emmc_part_read(pkg2_part, BCT_SIZE / EMMC_BLOCKSIZE, 1, bctBuf);
 	u32 *hdr = (u32 *)(bctBuf + 0x100);
@@ -759,6 +761,7 @@ int hos_launch(ini_sec_t *cfg)
 	volatile secmon_mailbox_t *secmon_mailbox;
 
 	minerva_change_freq(FREQ_1600);
+	sdram_src_pllc(true);
 	list_init(&ctxt.kip1_list);
 
 	ctxt.cfg = cfg;
@@ -801,6 +804,7 @@ int hos_launch(ini_sec_t *cfg)
 		// Check if stock is enabled and device can boot in OFW.
 		if (ctxt.stock && (h_cfg.t210b01 || !tools_autorcm_enabled()))
 		{
+			sdram_src_pllc(false);
 			emmc_end();
 
 			WPRINTF("\nRebooting to OFW in 5s...");
@@ -839,7 +843,7 @@ int hos_launch(ini_sec_t *cfg)
 	if (!ctxt.stock)
 	{
 		u32 fuses = fuse_read_odm(7);
-		if ((h_cfg.autonogc &&
+		if ((h_cfg.autonogc && // Prevent GC fuse burning (sysMMC and emuMMC).
 			  (
 				(!(fuses &    ~0xF) && (ctxt.pkg1_id->fuses >=  5)) || // LAFW v2,  4.0.0+
 				(!(fuses &  ~0x3FF) && (ctxt.pkg1_id->fuses >= 11)) || // LAFW v3,  9.0.0+
@@ -848,12 +852,12 @@ int hos_launch(ini_sec_t *cfg)
 				(!(fuses & ~0x3FFF) && (ctxt.pkg1_id->fuses >= 15))    // LAFW v5, 12.0.2+
 			  )
 			)
-		|| ((emummc_enabled) &&
+		|| ((emummc_enabled) && // Force NOGC if already burnt (only emuMMC).
 			  (
-				((fuses & 0x400)  && (ctxt.pkg1_id->fuses <= 10)) || // HOS  9.0.0+ fuses burnt.
-				((fuses & 0x2000) && (ctxt.pkg1_id->fuses <= 13)) || // HOS 11.0.0+ fuses burnt.
-				// Detection broken! Use kip1patch=nogc              // HOS 12.0.0+
-				((fuses & 0x4000) && (ctxt.pkg1_id->fuses <= 14))    // HOS 12.0.2+ fuses burnt.
+				((fuses & BIT(10)) && (ctxt.pkg1_id->fuses <= 10)) || // HOS  9.0.0+ fuses burnt.
+				((fuses & BIT(13)) && (ctxt.pkg1_id->fuses <= 13)) || // HOS 11.0.0+ fuses burnt.
+				// Detection broken! Use kip1patch=nogc               // HOS 12.0.0+
+				((fuses & BIT(14)) && (ctxt.pkg1_id->fuses <= 14))    // HOS 12.0.2+ fuses burnt.
 			  )
 			))
 			config_kip1patch(&ctxt, "nogc");
@@ -1016,7 +1020,7 @@ int hos_launch(ini_sec_t *cfg)
 			}
 
 			// In case a kernel patch option is set; allows to disable SVC verification or/and enable debug mode.
-			kernel_patch_t *kernel_patchset = ctxt.pkg2_kernel_id->kernel_patchset;
+			const kernel_patch_t *kernel_patchset = ctxt.pkg2_kernel_id->kernel_patchset;
 			if (kernel_patchset != NULL)
 			{
 				gfx_printf("%kPatching kernel%k\n", TXT_CLR_ORANGE, TXT_CLR_DEFAULT);
@@ -1165,6 +1169,7 @@ int hos_launch(ini_sec_t *cfg)
 
 	// Disable display. This must be executed before secmon to provide support for all fw versions.
 	display_end();
+	clock_disable_host1x();
 
 	// Override uCID if set.
 	EMC(EMC_SCRATCH0) = ctxt.ucid;
@@ -1173,7 +1178,11 @@ int hos_launch(ini_sec_t *cfg)
 	CLOCK(CLK_RST_CONTROLLER_RST_DEV_L_SET) = BIT(CLK_L_USBD);
 	CLOCK(CLK_RST_CONTROLLER_RST_DEV_H_SET) = BIT(CLK_H_AHBDMA) | BIT(CLK_H_APBDMA) | BIT(CLK_H_USB2);
 
+	// Reset arbiter.
+	hw_config_arbiter(true);
+
 	// Scale down RAM OC if enabled.
+	sdram_src_pllc(false);
 	minerva_prep_boot_freq();
 
 	// Flush cache and disable MMU.
@@ -1189,6 +1198,7 @@ int hos_launch(ini_sec_t *cfg)
 
 error:
 	_free_launch_components(&ctxt);
+	sdram_src_pllc(false);
 	emmc_end();
 
 	EPRINTF("\nFailed to launch HOS!");
