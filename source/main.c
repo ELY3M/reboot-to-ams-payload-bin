@@ -46,7 +46,7 @@ volatile nyx_storage_t *nyx_str = (nyx_storage_t *)NYX_STORAGE_ADDR;
 
 
 
-
+/*
 static void _check_power_off_from_hos()
 {
 	// Power off on alarm wakeup from HOS shutdown. For modchips/dongles.
@@ -88,6 +88,7 @@ static void _check_power_off_from_hos()
 		power_set_state(POWER_OFF_RESET);
 	}
 }
+*/ 
 
 // This is a safe and unused DRAM region for our payloads.
 #define RELOC_META_OFF      0x7C
