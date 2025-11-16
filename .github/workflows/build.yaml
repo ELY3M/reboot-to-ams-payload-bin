@@ -19,6 +19,11 @@ jobs:
       - name: build
         run: make -j2
 
+      - name: workspace list 
+        run: | 
+          echo ${{ github.workspace }}
+          ls -la ${{ github.workspace }}
+
       - name: test
         run: ls -la out
         
