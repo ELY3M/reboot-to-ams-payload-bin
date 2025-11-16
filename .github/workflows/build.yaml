@@ -1,4 +1,4 @@
-name: Build Payload
+name: Build
 
 on:
   push:
@@ -11,20 +11,16 @@ jobs:
     name: Test build
     runs-on: ubuntu-latest
     container:
-      image: 'devkitpro/devkita64'
+      ##image: 'devkitpro/devkita64'
+      image: 'ghcr.io/irneracoonovich/devkita64'
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: build
         run: make -j2
-
-      - name: workspace list 
-        run: | 
-          echo ${{ github.workspace }}
-##ls -la ${{ github.workspace }}
 
       - name: test
         run: ls -la out
