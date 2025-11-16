@@ -29,5 +29,5 @@ jobs:
           prerelease: false
           draft: false
           body: ${{ github.event.head_commit.message }}
-          files: out/boot_to_ams.bin
+          files: ${{ github.workspace }}/out/boot_to_ams.bin
           name: "Switch Payload Release #${{ github.run_number }}"
