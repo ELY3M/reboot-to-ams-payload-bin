@@ -20,7 +20,7 @@ jobs:
         run: make -j2
 
       - name: test
-        run: ls -la
+        run: ls -la out
         
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
