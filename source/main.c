@@ -38,8 +38,9 @@ const volatile ipl_ver_meta_t __attribute__((section ("._ipl_version"))) ipl_ver
 	.magic = BL_MAGIC,
 	//.version = (BL_VER_MJ + '0') | ((BL_VER_MN + '0') << 8) | ((BL_VER_HF + '0') << 16) | ((BL_VER_RL) << 24),
 	.version = 0,
-	.rsvd0 = 0,
-	.rsvd1 = 0
+	.rcfg.rsvd_flags   = 0,
+	.rcfg.bclk_t210    = BPMP_CLK_LOWER_BOOST,
+	.rcfg.bclk_t210b01 = BPMP_CLK_DEFAULT_BOOST
 };
 
 volatile nyx_storage_t *nyx_str = (nyx_storage_t *)NYX_STORAGE_ADDR;
@@ -343,7 +344,7 @@ static void _show_errors()
 
 static void _check_low_battery()
 {
-	if (fuse_read_hw_state() == FUSE_NX_HW_STATE_DEV)
+	if (h_cfg.devmode)
 		goto out;
 
 	int enough_battery;
@@ -642,7 +643,7 @@ void ipl_main()
 	display_init();
 
 	// Overclock BPMP.
-	bpmp_clk_rate_set(h_cfg.t210b01 ? BPMP_CLK_DEFAULT_BOOST : BPMP_CLK_LOWER_BOOST);
+	bpmp_clk_rate_set(h_cfg.t210b01 ? ipl_ver.rcfg.bclk_t210b01 : ipl_ver.rcfg.bclk_t210);
 
 	// Mount SD Card.
 	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
@@ -660,7 +661,7 @@ void ipl_main()
 		h_cfg.errors |= ERR_LIBSYS_LP0;
 
 	// Train DRAM and switch to max frequency.
-	if (minerva_init()) //!TODO: Add Tegra210B01 support to minerva.
+	if (minerva_init((minerva_str_t *)&nyx_str->minerva)) //!TODO: Add Tegra210B01 support to minerva.
 		h_cfg.errors |= ERR_LIBSYS_MTC;
 
 	// Disable watchdog protection.
