@@ -180,7 +180,7 @@ int launch_payload(char *path, bool clear_screen)
 		{
 			_reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
 
-		hw_deinit(false, byte_swap_32(*(u32 *)(buf + size - sizeof(u32))));
+		hw_deinit(false);
 		}
 		else
 		{
@@ -190,7 +190,7 @@ int launch_payload(char *path, bool clear_screen)
 			u32 magic = 0;
 			char *magic_ptr = buf + COREBOOT_VER_OFF;
 			memcpy(&magic, magic_ptr + strlen(magic_ptr) - 4, 4);
-			hw_deinit(true, magic);
+			hw_deinit(true);
 		}
 
 		// Some cards (Sandisk U1), do not like a fast power cycle. Wait min 100ms.
