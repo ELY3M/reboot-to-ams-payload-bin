@@ -94,130 +94,89 @@ static void _check_power_off_from_hos()
 // This is a safe and unused DRAM region for our payloads.
 #define RELOC_META_OFF      0x7C
 #define PATCHED_RELOC_SZ    0x94
+#define VERSION_RCFG_OFF    0x120
 #define PATCHED_RELOC_STACK 0x40007000
 #define PATCHED_RELOC_ENTRY 0x40010000
 #define EXT_PAYLOAD_ADDR    0xC0000000
 #define RCM_PAYLOAD_ADDR    (EXT_PAYLOAD_ADDR + ALIGN(PATCHED_RELOC_SZ, 0x10))
-#define COREBOOT_END_ADDR   0xD0000000
-#define COREBOOT_VER_OFF    0x41
-#define CBFS_DRAM_EN_ADDR   0x4003E000
-#define  CBFS_DRAM_MAGIC    0x4452414D // "DRAM"
+///#define COREBOOT_END_ADDR   0xD0000000
+///#define COREBOOT_VER_OFF    0x41
+///#define CBFS_DRAM_EN_ADDR   0x4003E000
+///#define  CBFS_DRAM_MAGIC    0x4452414D // "DRAM"
 
-static void *coreboot_addr;
+///static void *coreboot_addr;
 
-static void _reloc_patcher(u32 payload_dst, u32 payload_src, u32 payload_size)
+static void _reloc_append(u32 payload_dst, u32 payload_src, u32 payload_size)
 {
 	memcpy((u8 *)payload_src, (u8 *)IPL_LOAD_ADDR, PATCHED_RELOC_SZ);
 
-	reloc_meta_t *relocator = (reloc_meta_t *)(payload_src + RELOC_META_OFF);
+	volatile reloc_meta_t *relocator = (reloc_meta_t *)(payload_src + RELOC_META_OFF);
 
 	relocator->start = payload_dst - ALIGN(PATCHED_RELOC_SZ, 0x10);
 	relocator->stack = PATCHED_RELOC_STACK;
 	relocator->end   = payload_dst + payload_size;
 	relocator->ep    = payload_dst;
-
-	if (payload_size == 0x7000)
-	{
-		memcpy((u8 *)(payload_src + ALIGN(PATCHED_RELOC_SZ, 0x10)), coreboot_addr, 0x7000); // Bootblock.
-		*(vu32 *)CBFS_DRAM_EN_ADDR = CBFS_DRAM_MAGIC;
-	}
 }
 
-
-
-int launch_payload(char *path, bool clear_screen)
+static void _launch_payload(char *path, bool clear_screen)
 {
 	if (clear_screen)
 		gfx_clear_grey(0x1B);
 	gfx_con_setpos(0, 0);
-	if (!path)
-		return 1;
 
-	if (sd_mount())
+	// Read payload.
+	u32 size = 0;
+	void *buf = sd_file_read(path, &size);
+	if (!buf)
 	{
-		FIL fp;
-		if (f_open(&fp, path, FA_READ))
-		{
-			gfx_con.mute = false;
-			EPRINTFARGS("Payload file is missing!\n(%s)", path);
+		gfx_con.mute = false;
+		EPRINTFARGS("Payload file is missing!\n(%s)", path);
 
-			goto out;
-		}
-
-		// Read and copy the payload to our chosen address
-		void *buf;
-		u32 size = f_size(&fp);
-
-		if (size < 0x30000)
-			buf = (void *)RCM_PAYLOAD_ADDR;
-		else
-		{
-			coreboot_addr = (void *)(COREBOOT_END_ADDR - size);
-			buf = coreboot_addr;
-			if (h_cfg.t210b01)
-			{
-				f_close(&fp);
-
-				gfx_con.mute = false;
-				EPRINTF("Coreboot not allowed on Mariko!");
-
-				goto out;
-			}
-		}
-
-		if (f_read(&fp, buf, size, NULL))
-		{
-			f_close(&fp);
-
-			goto out;
-		}
-
-		f_close(&fp);
-
-		sd_end();
-
-		if (size < 0x30000)
-		{
-			_reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
-
-		hw_deinit(false);
-		}
-		else
-		{
-			_reloc_patcher(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, 0x7000);
-
-			// Get coreboot seamless display magic.
-			u32 magic = 0;
-			char *magic_ptr = buf + COREBOOT_VER_OFF;
-			memcpy(&magic, magic_ptr + strlen(magic_ptr) - 4, 4);
-			hw_deinit(true);
-		}
-
-		// Some cards (Sandisk U1), do not like a fast power cycle. Wait min 100ms.
-		sdmmc_storage_init_wait_sd();
-
-		void (*ext_payload_ptr)() = (void *)EXT_PAYLOAD_ADDR;
-
-		// Launch our payload.
-		(*ext_payload_ptr)();
+		goto out;
 	}
 
-out:
+	// Check if it safely fits IRAM.
+	if (size > 0x30000)
+	{
+		gfx_con.mute = false;
+		EPRINTF("Payload is too big!");
+
+		goto out;
+	}
+
 	sd_end();
-	return 1;
+
+	// Copy the payload to our chosen address.
+	memcpy((void *)RCM_PAYLOAD_ADDR, buf, size);
+
+	// Append relocator or set config.
+	void (*payload_ptr)();
+
+	_reloc_append(PATCHED_RELOC_ENTRY, EXT_PAYLOAD_ADDR, ALIGN(size, 0x10));
+	 payload_ptr = (void *)EXT_PAYLOAD_ADDR;
+
+	hw_deinit(false);
+
+	// Launch our payload.
+	(*payload_ptr)();
+
+out:
+	free(buf);
+	gfx_con.mute = false;
+	EPRINTF("Failed to launch payload!");
 }
+	
 
 
-
-#define EXCP_EN_ADDR   0x4003FFFC
+#define EXCP_EN_ADDR   0x4003FF1C
 #define  EXCP_MAGIC       0x30505645 // "EVP0".
-#define EXCP_TYPE_ADDR 0x4003FFF8
+#define EXCP_TYPE_ADDR 0x4003FF18
 #define  EXCP_TYPE_RESET  0x545352   // "RST".
 #define  EXCP_TYPE_UNDEF  0x464455   // "UDF".
 #define  EXCP_TYPE_PABRT  0x54424150 // "PABT".
 #define  EXCP_TYPE_DABRT  0x54424144 // "DABT".
 #define  EXCP_TYPE_WDT    0x544457   // "WDT".
-#define EXCP_LR_ADDR   0x4003FFF4
+#define EXCP_LR_ADDR   0x4003FF14
 
 #define PSTORE_LOG_OFFSET 0x180000
 #define PSTORE_RAM_SIG    0x43474244 // "DBGC".
@@ -273,7 +232,16 @@ static void _show_errors()
 			h_cfg.errors &= ~(ERR_LIBSYS_LP0 | ERR_LIBSYS_MTC);
 		}
 
+		/*
+		if (h_cfg.errors & ERR_LIBSYS_LP0)
+			WPRINTF("Missing LP0 (sleep) lib!\n");
+		if (h_cfg.errors & ERR_LIBSYS_MTC)
+			WPRINTF("Missing Minerva lib!\n");
 
+		if (h_cfg.errors & (ERR_LIBSYS_LP0 | ERR_LIBSYS_MTC))
+			WPRINTF("\nUpdate bootloader folder!\n\n");
+        */ 
+		
 		if (h_cfg.errors & ERR_EXCEPTION)
 		{
 			WPRINTFARGS("hekate exception occurred (LR %08X):\n", *excp_lr);
@@ -302,23 +270,7 @@ static void _show_errors()
 			*excp_type = 0;
 		}
 
-		if (h_cfg.errors & ERR_L4T_KERNEL)
-		{
-			WPRINTF("L4T Kernel panic occurred!\n");
-			if (!(h_cfg.errors & ERR_SD_BOOT_EN))
-			{
-				if (!sd_save_to_file((void *)PSTORE_ADDR, PSTORE_SZ, "L4T_panic.bin"))
-					WPRINTF("PSTORE saved to L4T_panic.bin");
-				pstore_buf_t *buf = (pstore_buf_t *)(PSTORE_ADDR + PSTORE_LOG_OFFSET);
-				if (buf->sig == PSTORE_RAM_SIG && buf->size && buf->size < 0x80000)
-				{
-					u32 log_offset = PSTORE_ADDR + PSTORE_LOG_OFFSET + sizeof(pstore_buf_t);
-					if (!sd_save_to_file((void *)log_offset, buf->size, "L4T_panic.txt"))
-						WPRINTF("Log saved to L4T_panic.txt");
-				}
-			}
-			gfx_puts("\n");
-		}
+
 
 		if (h_cfg.errors & ERR_PANIC_CODE)
 		{
@@ -580,7 +532,7 @@ static void boot_to_ams() {
 
 	sd_mount();
 	if (!f_stat("atmosphere/reboot_payload.bin", NULL)) {
-		launch_payload("atmosphere/reboot_payload.bin", false);
+		_launch_payload("atmosphere/reboot_payload.bin", false);
 	} else {
 		EPRINTF("I can't find reboot_payload.bin!");
 	}
@@ -614,6 +566,8 @@ menu_t menu_top = { ment_top, "Mouse", 0, 0 };
 
 extern void pivot_stack(u32 stack_top);
 
+
+/*
 void ipl_main()
 {
 	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
@@ -700,3 +654,98 @@ skip_lp0_minerva_config:
 	while (true)
 		bpmp_halt();
 }
+*/
+
+void ipl_main()
+{
+	// Override DRAM ID if needed.
+	if (ipl_ver.rcfg.rsvd_flags & RSVD_FLAG_DRAM_8GB)
+		fuse_force_8gb_dramid();
+
+	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
+	hw_init();
+
+	// Pivot the stack under IPL. (Only max 4KB is needed).
+	pivot_stack(IPL_LOAD_ADDR);
+
+	// Place heap at a place outside of L4T/HOS configuration and binaries.
+	heap_init((void *)IPL_HEAP_START);
+
+#ifdef DEBUG_UART_PORT
+	uart_send(DEBUG_UART_PORT, (u8 *)"hekate: Hello!\n", 15);
+	uart_wait_xfer(DEBUG_UART_PORT, UART_TX_IDLE);
+#endif
+
+	// Set bootloader's default configuration.
+	set_default_configuration();
+
+	// Check if battery is enough.
+	_check_low_battery();
+
+	// Prep RTC regs for read. Needed for T210B01 R2C.
+	max77620_rtc_prep_read();
+
+	// Initialize display.
+	display_init();
+
+	// Overclock BPMP.
+	bpmp_clk_rate_set(h_cfg.t210b01 ? ipl_ver.rcfg.bclk_t210b01 : ipl_ver.rcfg.bclk_t210);
+
+	// Mount SD Card.
+	if (sd_mount())
+		h_cfg.errors |= ERR_SD_BOOT_EN;
+
+	// Check if watchdog was fired previously.
+	if (watchdog_fired())
+		goto skip_lp0_minerva_config;
+
+	// Enable watchdog protection to avoid SD corruption based hanging in LP0/Minerva config.
+	watchdog_start(5000000 / 2, TIMER_FIQENABL_EN); // 5 seconds.
+
+	// Save sdram lp0 config.
+	void *sdram_params = h_cfg.t210b01 ? sdram_get_params_t210b01() : sdram_get_params_patched();
+	if (!ianos_static_module("bootloader/sys/libsys_lp0.bso", sdram_params))
+		h_cfg.errors |= ERR_LIBSYS_LP0;
+
+	// Train DRAM and switch to max frequency.
+	if (minerva_init((minerva_str_t *)&nyx_str->minerva))
+		h_cfg.errors |= ERR_LIBSYS_MTC;
+
+	// Disable watchdog protection.
+	watchdog_end();
+
+skip_lp0_minerva_config:
+	// Initialize display window, backlight and gfx console.
+	u32 *fb = display_init_window_a_pitch();
+	gfx_init_ctxt(fb, 720, 1280, 720);
+	gfx_con_init();
+
+	// Initialize backlight PWM.
+	display_backlight_pwm_init();
+	display_backlight_brightness(300, 1000);
+
+	// Show exceptions, HOS errors, library errors and L4T kernel panics.
+	_show_errors();
+
+	// Get R2C config from RTC.
+	if (h_cfg.t210b01)
+		_r2c_get_config_t210b01();
+
+
+	// Failed to launch Nyx, unmount SD Card.
+	sd_end();
+
+	// Set ram to a freq that doesn't need periodic training.
+	minerva_change_freq(FREQ_800);
+
+	while (true) {
+		_mouse();
+		boot_to_ams();
+	}
+
+	// Halt BPMP if we managed to get out of execution.
+	while (true)
+		bpmp_halt();
+}
+
+

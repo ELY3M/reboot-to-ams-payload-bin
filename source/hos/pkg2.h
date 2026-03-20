@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018 naehrwert
- * Copyright (c) 2018-2025 CTCaer
+ * Copyright (c) 2018-2026 CTCaer
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -71,7 +71,7 @@ enum
 typedef struct _pkg2_hdr_t
 {
 /* 0x000 */	u8  ctr[0x10];
-/* 0x010 */	u8  sec_ctr[0x40];
+/* 0x010 */	u8  sec_ctr[4][SE_AES_IV_SIZE];
 /* 0x050 */	u32 magic;
 /* 0x054 */	u32 base;
 /* 0x058 */	u32 pad0;
@@ -80,7 +80,7 @@ typedef struct _pkg2_hdr_t
 /* 0x05E */	u16 pad1;
 /* 0x060 */	u32 sec_size[4];
 /* 0x070 */	u32 sec_off[4];
-/* 0x080 */	u8  sec_sha256[0x80];
+/* 0x080 */	u8  sec_sha256[4][SE_SHA_256_SIZE];
 /* 0x100 */	u8  data[];
 } pkg2_hdr_t;
 
@@ -208,8 +208,8 @@ typedef struct _nx_bc_t {
 	u8  padding2[0xC0];
 } nx_bc_t;
 
-bool pkg2_parse_kips(link_t *info, pkg2_hdr_t *pkg2, bool *new_pkg2);
-int  pkg2_has_kip(link_t *info, u64 tid);
+int  pkg2_parse_kips(link_t *info, pkg2_hdr_t *pkg2, bool *new_pkg2);
+bool pkg2_has_kip(link_t *info, u64 tid);
 void pkg2_replace_kip(link_t *info, u64 tid, pkg2_kip1_t *kip1);
 void pkg2_add_kip(link_t *info, pkg2_kip1_t *kip1);
 void pkg2_merge_kip(link_t *info, pkg2_kip1_t *kip1);
