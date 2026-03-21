@@ -36,8 +36,8 @@ hekate_config h_cfg;
 boot_cfg_t __attribute__((section ("._boot_cfg"))) b_cfg;
 const volatile ipl_ver_meta_t __attribute__((section ("._ipl_version"))) ipl_ver = {
 	.magic = BL_MAGIC,
-	//.version = (BL_VER_MJ + '0') | ((BL_VER_MN + '0') << 8) | ((BL_VER_HF + '0') << 16) | ((BL_VER_RL) << 24),
-	.version = 0,
+	.version = (BL_VER_MJ + '0') | ((BL_VER_MN + '0') << 8) | ((BL_VER_HF + '0') << 16) | ((BL_VER_RL) << 24),
+	///.version = 0,
 	.rcfg.rsvd_flags   = 0,
 	.rcfg.bclk_t210    = BPMP_CLK_LOWER_BOOST,
 	.rcfg.bclk_t210b01 = BPMP_CLK_DEFAULT_BOOST
@@ -99,12 +99,6 @@ static void _check_power_off_from_hos()
 #define PATCHED_RELOC_ENTRY 0x40010000
 #define EXT_PAYLOAD_ADDR    0xC0000000
 #define RCM_PAYLOAD_ADDR    (EXT_PAYLOAD_ADDR + ALIGN(PATCHED_RELOC_SZ, 0x10))
-///#define COREBOOT_END_ADDR   0xD0000000
-///#define COREBOOT_VER_OFF    0x41
-///#define CBFS_DRAM_EN_ADDR   0x4003E000
-///#define  CBFS_DRAM_MAGIC    0x4452414D // "DRAM"
-
-///static void *coreboot_addr;
 
 static void _reloc_append(u32 payload_dst, u32 payload_src, u32 payload_size)
 {
@@ -565,96 +559,6 @@ ment_t ment_top[] = {
 menu_t menu_top = { ment_top, "Mouse", 0, 0 };
 
 extern void pivot_stack(u32 stack_top);
-
-
-/*
-void ipl_main()
-{
-	// Do initial HW configuration. This is compatible with consecutive reruns without a reset.
-	hw_init();
-
-	// Pivot the stack under IPL. (Only max 4KB is needed).
-	pivot_stack(IPL_LOAD_ADDR);
-
-	// Place heap at a place outside of L4T/HOS configuration and binaries.
-	heap_init((void *)IPL_HEAP_START);
-
-#ifdef DEBUG_UART_PORT
-	uart_send(DEBUG_UART_PORT, (u8 *)"hekate: Hello!\r\n", 16);
-	uart_wait_xfer(DEBUG_UART_PORT, UART_TX_IDLE);
-#endif
-
-	// Check if battery is enough.
-	_check_low_battery();
-
-	// Set bootloader's default configuration.
-	set_default_configuration();
-
-	// Prep RTC regs for read. Needed for T210B01 R2P.
-	max77620_rtc_prep_read();
-
-	// Initialize display.
-	display_init();
-
-	// Overclock BPMP.
-	bpmp_clk_rate_set(h_cfg.t210b01 ? ipl_ver.rcfg.bclk_t210b01 : ipl_ver.rcfg.bclk_t210);
-
-	// Mount SD Card.
-	h_cfg.errors |= !sd_mount() ? ERR_SD_BOOT_EN : 0;
-
-	// Check if watchdog was fired previously.
-	if (watchdog_fired())
-		goto skip_lp0_minerva_config;
-
-	// Enable watchdog protection to avoid SD corruption based hanging in LP0/Minerva config.
-	watchdog_start(5000000 / 2, TIMER_FIQENABL_EN); // 5 seconds.
-
-	// Save sdram lp0 config.
-	void *sdram_params = h_cfg.t210b01 ? sdram_get_params_t210b01() : sdram_get_params_patched();
-	if (!ianos_loader("bootloader/sys/libsys_lp0.bso", DRAM_LIB, sdram_params))
-		h_cfg.errors |= ERR_LIBSYS_LP0;
-
-	// Train DRAM and switch to max frequency.
-	if (minerva_init((minerva_str_t *)&nyx_str->minerva)) //!TODO: Add Tegra210B01 support to minerva.
-		h_cfg.errors |= ERR_LIBSYS_MTC;
-
-	// Disable watchdog protection.
-	watchdog_end();
-
-skip_lp0_minerva_config:
-	// Initialize display window, backlight and gfx console.
-	u32 *fb = display_init_window_a_pitch();
-	gfx_init_ctxt(fb, 720, 1280, 720);
-	gfx_con_init();
-
-	display_backlight_pwm_init();
-	display_backlight_brightness(230, 1000);
-
-	// Get R2C config from RTC.
-	if (h_cfg.t210b01)
-		_r2c_get_config_t210b01();
-
-	// Show exceptions, HOS errors, library errors and L4T kernel panics.
-	_show_errors();
-
-
-	// Failed to launch Nyx, unmount SD Card.
-	sd_end();
-
-	// Set ram to a freq that doesn't need periodic training.
-	minerva_change_freq(FREQ_800);
-
-	while (true) {
-		_mouse();
-		boot_to_ams();
-		//tui_do_menu(&menu_top);
-	}
-	
-	// Halt BPMP if we managed to get out of execution.
-	while (true)
-		bpmp_halt();
-}
-*/
 
 void ipl_main()
 {
